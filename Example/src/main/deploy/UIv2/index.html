@@ -6,7 +6,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Reefscape Touchscreen Interface</title>
     <link rel="stylesheet" href="style.css">
-    <link rel="icon" type="image/x-icon" href="/src/main/deploy/UIv1/images/Logos-Mega/default-png.ico" />
+    <link rel="icon" type="image/x-icon" href="images/Logos-Mega/default-png.ico" />
+    <script src="jquery-3.7.1.min.js"></script>
 </head>
 <body>
     
@@ -68,166 +69,163 @@
 
     </div>
 
-    <script type="text/javascript">
-    "use strict";
+    <script type="module">
+    import { NT4_Client, NT4_TYPESTR } from "./lib/nt4/nt4.js";
 
-    let previousButtonReef = null;
-    let buttonClickedReef = false;
-    let previousButtonLevel = null;
-    let buttonClickedLevel = false;
+    // ---------- Configuração ----------
+    // Endereço do robô. Troque por URL: index.html?robot=localhost (simulação) ou ?robot=10.75.63.2
+    // O padrão é o hostname do roboRIO, que funciona na maioria dos casos.
+    const ROBOT = new URLSearchParams(location.search).get("robot") || "roborio-7563-frc.local";
+    const REEF = ["A","B","C","D","E","F","G","H","I","J","K","L","L1","L2","L3","L4"];
+
+    // Cores dos botões
     const purple = "#6200ea";
     const green = "#4CAF50";
     const gray = "#a1a4a1";
 
-    // This is the function that will be called when the page is loaded
-    $(document).ready(function(){
+    // ---------- Estado ----------
+    // LOGICA para desativar botões quando clicar fora deles, para não ficar "travado" no botão selecionado
+    let previousButtonReef = null;
+    let buttonClickedReef = false;
+    let previousButtonLevel = null;
+    let buttonClickedLevel = false;
+    let lastConnected = null;   // evita repetir eventos a cada tentativa de reconexão
 
-        // sets a function that will be called when the websocket connects/disconnects
-        NetworkTables.addWsConnectionListener(onNetworkTablesConnection, true);
+    // ---------- Cliente NT4 ----------
+    // O client NT4 é responsável por conectar ao robô, publicar e assinar tópicos.
+    //inicializa o client NT4 com os callbacks de conexão, desconexão e recebimento de dados
+    const nt = new NT4_Client(ROBOT, () => {}, () => {}, onData, onConnect, onDisconnect);
 
-        // sets a function that will be called when the robot connects/disconnects
-        NetworkTables.addRobotConnectionListener(onRobotConnection, true);
+    // Tópicos que o navegador publica (um boolean por botão). O client republica sozinho ao reconectar.
+    const pubTopics = new Map();
+    for (const n of REEF) {
+        const name = "/SmartDashboard/" + n + "ButtonValue";
+        pubTopics.set(name, nt.publishNewTopic(name, NT4_TYPESTR.BOOL));
+    }
 
-        // sets a function that will be called when any NetworkTables key/value changes
-        NetworkTables.addGlobalListener(function(key,value,isNew){}, true);
+    // Tópicos que o navegador lê. O client reassina sozinho ao reconectar.
+    nt.subscribePeriodic(["/FMSInfo/IsRedAlliance", "/SmartDashboard/enableInterface"], 0.05);
 
-        // sets a function that will be called when the NetworkTables instance indicates the robot alliance
-        NetworkTables.addKeyListener('/FMSInfo/IsRedAlliance', onAllianceConnection, true);
+    // ---------- Funções ----------
 
-        // sets a function that will be called when the NetworkTables instance indicates if the interface is enabled
-        NetworkTables.addKeyListener('/SmartDashboard/enableInterface', enableInterface, true);
-    }); 
+    /**
+     * boolean - Define o valor de um tópico publicado pelo navegador. Se o tópico não existir, nada acontece.
+     * @param {string} name - Nome do tópico
+     * @param {boolean} value - Valor a ser definido
+     */
+    function putValue(name, value) {
+        const topic = pubTopics.get(name);
+        if (topic) nt.addSample(topic, nt.getServerTime_us(), value);
+    }
 
+    /**
+     * Função chamada quando há dados disponíveis em um tópico assinado.
+     * @param {Object} topic - O tópico do qual os dados foram recebidos
+     * @param {number} timestamp_us - O timestamp dos dados em microsegundos
+     * @param {any} value - O valor dos dados recebidos
+     */
+    function onData(topic, timestamp_us, value) {
+        if (topic.name === "/FMSInfo/IsRedAlliance") onAllianceConnection(value);
+        else if (topic.name === "/SmartDashboard/enableInterface") enableInterface(value);
+    }
 
-    
+    // No NT4 a conexão WebSocket é direta com o roboRIO,
+    // então "NetworkTables conectado" e "robô conectado" são o mesmo evento.
+    function onConnect()    { setConnection(true); }
+    function onDisconnect() { setConnection(false); }
+
+    function setConnection(connected) {
+        if (connected === lastConnected) return;
+        lastConnected = connected;
+        onNetworkTablesConnection(connected);
+        onRobotConnection(connected);
+    }
+
+    // ---------- Botões ----------
     function selectReef(position) {
-        // If a button was previously clicked, change its color back to gray
-        if(previousButtonReef != null){
-            previousButtonReef.style.backgroundColor = gray;
-        }
-        // Set the value of the button to true
-        NetworkTables.putValue('/SmartDashboard/' + position + 'ButtonValue',true);
+        if (previousButtonReef != null) previousButtonReef.style.backgroundColor = gray;
+        putValue('/SmartDashboard/' + position + 'ButtonValue', true);
         const button = document.getElementById(position);
-        // Change the color of the button to purple
         button.style.backgroundColor = purple;
-        // Set the button as the previous button clicked
         previousButtonReef = button;
         buttonClickedReef = true;
     }
 
     function selectLevel(level) {
-        // If a button was previously clicked, change its color back to gray
-        if(previousButtonLevel != null){
-            previousButtonLevel.style.backgroundColor = gray;
-        }
-        // Set the value of the button to true
-        NetworkTables.putValue('/SmartDashboard/' + level + 'ButtonValue',true);
+        if (previousButtonLevel != null) previousButtonLevel.style.backgroundColor = gray;
+        putValue('/SmartDashboard/' + level + 'ButtonValue', true);
         const button = document.getElementById(level);
-        // Change the color of the button to green
         button.style.backgroundColor = green;
-        // Set the button as the previous button clicked
         previousButtonLevel = button;
         buttonClickedLevel = true;
     }
 
+    // Módulos ES não expõem funções globais; os onclick do HTML precisam delas em window
+    window.selectReef = selectReef;
+    window.selectLevel = selectLevel;
+
     document.addEventListener('click', function(event) {
-        // If a Reef button was previously clicked and the user clicks outside of the buttons, change its color back to gray
         if (buttonClickedReef && !event.target.classList.contains('level-button') && !event.target.classList.contains('reef-button')) {
-            // Set the value of the button to false
-            NetworkTables.putValue('/SmartDashboard/' + previousButtonReef.id + 'ButtonValue',false);
-            // Change the color of the button to gray
-            if(previousButtonReef.style.backgroundColor == "rgb(98, 0, 234)"){
+            putValue('/SmartDashboard/' + previousButtonReef.id + 'ButtonValue', false);
+            if (previousButtonReef.style.backgroundColor == "rgb(98, 0, 234)") {
                 previousButtonReef.style.backgroundColor = gray;
                 buttonClickedReef = false;
             }
-
         }
 
-        // If a Level button was previously clicked and the user clicks outside of the buttons, change its color back to gray
         if (buttonClickedLevel && !event.target.classList.contains('level-button') && !event.target.classList.contains('reef-button')
                 && (event.target.id === 'reef-pipe' || event.target.id === 'img-pipe')) {
-            // Set the value of the button to false
-            NetworkTables.putValue('/SmartDashboard/' + previousButtonLevel.id + 'ButtonValue',false);
-            // Change the color of the button to gray
-            if(previousButtonLevel.style.backgroundColor == "rgb(76, 175, 80)"){
+            putValue('/SmartDashboard/' + previousButtonLevel.id + 'ButtonValue', false);
+            if (previousButtonLevel.style.backgroundColor == "rgb(76, 175, 80)") {
                 previousButtonLevel.style.backgroundColor = gray;
                 buttonClickedLevel = false;
             }
-
         }
     });
 
-
-
+    // ---------- Status ----------
     function onRobotConnection(connected) {
-        // This function is called when the robot connects or disconnects
         $('#robotstate').text(connected ? "Robot: Connected! #" : "Robot: Disconnected #");
-        $('#robotAddress').text(connected ? NetworkTables.getRobotAddress().substring(8,12) : "Off");
+        const team = ROBOT.match(/roborio-(\d+)/i);
+        $('#robotAddress').text(connected ? (team ? team[1] : ROBOT) : "Off");
 
-        // Change the color of the transition div depending on the connection state
-        if(!connected){
+        if (!connected) {
             $('#trans1').css('background-color', 'red');
             $('#ch1').click();
-        }else{
+        } else {
             $('#trans1').css('background-color', '#4CAF50');
         }
-
     }
 
     function onNetworkTablesConnection(connected) {
-        // This function is called when the NetworkTables connection state changes
-        if (connected) {
-            $("#connectstate").text("NetworkTables: Connected!");   
-        } else {
-            $("#connectstate").text("NetworkTables: Disconnected!");
-        }
+        $("#connectstate").text(connected ? "NetworkTables: Connected!" : "NetworkTables: Disconnected!");
     }
 
-    function onAllianceConnection(key, value, isNew) {
-        // This function is called when the alliance changes
+    function onAllianceConnection(value) {
         const alliance = document.getElementById("pb1");
         const image = document.getElementById('reef-position');
-        // Change the text of the button depending on the alliance
-        $(alliance).text(value?"RED ALLIANCE" : "BLUE ALLIANCE");
-        if(value){
-            // Change the alliance button to red
+        $(alliance).text(value ? "RED ALLIANCE" : "BLUE ALLIANCE");
+        if (value) {
             alliance.style.border = "1px solid #FF4655";
             alliance.style.color = "white";
-            alliance.style.backgroundColor   = "#FF4655";
+            alliance.style.backgroundColor = "#FF4655";
             alliance.style.backgroundPosition = "40%";
-            // Change the image to the red reef
             image.style.backgroundImage = "url('images/reef-red.png')";
-        }else{
-            // Change the alliance button to blue
+        } else {
             alliance.style.border = "1px solid #3F51B5";
-            alliance.style.color = "white"; 
+            alliance.style.color = "white";
             alliance.style.backgroundColor = "#3F51B5";
             alliance.style.backgroundPosition = "40%";
-            // Change the image to the blue reef
             image.style.backgroundImage = "url('images/reef-blue.png')";
         }
     }
 
-    function enableInterface(key, value, isNew){
-        // This function is called when the interface is enabled or disabled
-        $('#pb2').text(value?"INTERFACE ENABLED" : "INTERFACE DISABLED");
-        if(value){
-            // Change the interface button to green
-            $('#pb2').css('border', '1px solid #4CAF50'); 
-            $('#pb2').css('color', 'white'); 
-            $('#pb2').css('background-color', '#4CAF50'); 
-            $('#pb2').css('background-position', '40%');    
-        }else{
-            // Change the interface button to red
-            $('#pb2').css('border', '1px solid #FF4655'); 
-            $('#pb2').css('color', 'white'); 
-            $('#pb2').css('background-color', '#FF4655'); 
-            $('#pb2').css('background-position', '40%');    
-        }
+    function enableInterface(value) {
+        $('#pb2').text(value ? "INTERFACE ENABLED" : "INTERFACE DISABLED");
+        const c = value ? '#4CAF50' : '#FF4655';
+        $('#pb2').css({'border': '1px solid ' + c, 'color': 'white', 'background-color': c, 'background-position': '40%'});
     }
-
     </script>
 
 </body>
 </html>
-
