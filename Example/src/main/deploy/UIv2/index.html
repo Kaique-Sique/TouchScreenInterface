@@ -86,10 +86,8 @@
     // ---------- Estado ----------
     // LOGICA para desativar botões quando clicar fora deles, para não ficar "travado" no botão selecionado
     let previousButtonReef = null;
-    let previousReef = null;
     let buttonClickedReef = false;
     let previousButtonLevel = null;
-    let previousLevel = null;
     let buttonClickedLevel = false;
     let lastConnected = null;   // evita repetir eventos a cada tentativa de reconexão
 
@@ -145,8 +143,8 @@
 
     // ---------- Botões ----------
     function selectReef(position) {
-        if (previousReef != null && previousReef !== position) {
-            putValue('/SmartDashboard/' + previousReef + 'ButtonValue', false);
+        if (previousButtonReef != null && previousButtonReef.id !== position) {
+            putValue('/SmartDashboard/' + previousButtonReef.id + 'ButtonValue', false);
         }
         if (previousButtonReef != null) previousButtonReef.style.backgroundColor = gray;
         putValue('/SmartDashboard/' + position + 'ButtonValue', true);
@@ -154,12 +152,11 @@
         button.style.backgroundColor = purple;
         previousButtonReef = button;
         buttonClickedReef = true;
-        previousReef = position;
     }
 
     function selectLevel(level) {
-        if (previousLevel != null && previousLevel !== level) {
-            putValue('/SmartDashboard/' + previousLevel + 'ButtonValue', false);
+        if (previousButtonLevel != null && previousButtonLevel.id !== level) {
+            putValue('/SmartDashboard/' + previousButtonLevel.id + 'ButtonValue', false);
         }
         if (previousButtonLevel != null) previousButtonLevel.style.backgroundColor = gray;
         putValue('/SmartDashboard/' + level + 'ButtonValue', true);
@@ -167,7 +164,6 @@
         button.style.backgroundColor = green;
         previousButtonLevel = button;
         buttonClickedLevel = true;
-        previousLevel = level;
     }
 
     // Módulos ES não expõem funções globais; os onclick do HTML precisam delas em window
